@@ -3,7 +3,6 @@ import { Search, Globe, Image as ImageIcon, Video, Loader2, ExternalLink, Sparkl
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { GoogleGenAI } from "@google/genai";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -96,32 +95,7 @@ export default function App() {
           Heading: data.Heading
         });
       } else {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (apiKey && apiKey !== "undefined" && apiKey.length > 10) {
-          try {
-            const ai = new GoogleGenAI({ apiKey });
-            const result = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: `Provide a concise summary for the search query: "${q}". Keep it under 300 characters.`,
-              config: { tools: [{ googleSearch: {} }] }
-            });
-
-            if (result.text) {
-              setSummary({
-                AbstractText: result.text,
-                AbstractSource: "Spark AI",
-                AbstractURL: "#",
-                Heading: q,
-                Image: ""
-              });
-            }
-          } catch (aiErr) {
-            console.error('AI Summary fallback failed:', aiErr);
-            setSummary(null);
-          }
-        } else {
-          setSummary(null);
-        }
+        setSummary(null);
       }
     } catch (err) {
       console.error('Failed to fetch summary:', err);
@@ -174,44 +148,6 @@ export default function App() {
       }
       
       if (!response.ok) {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (apiKey && apiKey !== "undefined" && apiKey.length > 10) {
-          try {
-            const ai = new GoogleGenAI({ apiKey });
-            const result = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: `Provide a list of 10 search results for the query: "${targetQuery}". Return as a JSON array of objects with title, url, and snippet.`,
-              config: { 
-                tools: [{ googleSearch: {} }],
-                responseMimeType: "application/json"
-              }
-            });
-
-            if (result.text) {
-              const aiResults = JSON.parse(result.text);
-              if (Array.isArray(aiResults)) {
-                const formattedResults = aiResults.map((r: any) => ({
-                  type: category,
-                  title: r.title,
-                  url: r.url,
-                  snippet: r.snippet,
-                  favicon: `https://www.google.com/s2/favicons?domain=${new URL(r.url || "http://localhost").hostname}&sz=32`,
-                  metadata: { domain: new URL(r.url || "http://localhost").hostname, engine: "Spark AI" }
-                }));
-                setResultsMap(prev => ({ ...prev, [category]: formattedResults }));
-                setAggregationsMap(prev => ({ ...prev, [category]: {
-                  count: formattedResults.length,
-                  time: (Date.now() - startTime) / 1000,
-                  engines: ["Spark AI"],
-                  instance: "Spark AI Grid"
-                }}));
-                return;
-              }
-            }
-          } catch (aiErr) {
-            console.error('AI Search fallback failed:', aiErr);
-          }
-        }
         throw new Error(data.error || 'Search failed');
       }
       
@@ -349,12 +285,6 @@ export default function App() {
 
                 {currentAggregations && !isLoading && (
                   <div className="text-[10px] font-bold tracking-widest uppercase text-white/30 flex items-center gap-3">
-                    {currentAggregations.instance === "Spark AI Grid" && (
-                      <div className="flex items-center gap-1 text-neon-cyan neon-text-cyan">
-                        <Sparkles size={10} />
-                        <span>AI Enhanced</span>
-                      </div>
-                    )}
                     <span>{currentAggregations.count} Results</span>
                     <span className="w-1 h-1 rounded-full bg-white/10" />
                     <span>{currentAggregations.time}s</span>
