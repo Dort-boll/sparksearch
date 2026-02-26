@@ -1,0 +1,5 @@
+{
+  "name": "Spark Search",
+  "description": "A privacy-focused search engine with a neon glassmorphism aesthetic, powered by aggregated SearXNG instances.",
+  "requestFramePermissions": []
+}
