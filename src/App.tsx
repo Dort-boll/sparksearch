@@ -52,7 +52,11 @@ export default function App() {
     videos: null
   });
   const [summary, setSummary] = useState<InstantAnswer | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMap, setLoadingMap] = useState<Record<Category, boolean>>({
+    general: false,
+    images: false,
+    videos: false
+  });
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [activeTab, setActiveTab] = useState<Category>('general');
@@ -60,7 +64,14 @@ export default function App() {
   const [lastSearch, setLastSearch] = useState({ query: '', safe: true });
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -74,9 +85,9 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const fetchSummary = async (q: string) => {
+  const fetchSummary = async (q: string, signal: AbortSignal) => {
     try {
-      const response = await fetch(`/api/summary?q=${encodeURIComponent(q)}`);
+      const response = await fetch(`/api/summary?q=${encodeURIComponent(q)}`, { signal });
       const text = await response.text();
       
       let data: any = {};
@@ -97,7 +108,8 @@ export default function App() {
       } else {
         setSummary(null);
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
       console.error('Failed to fetch summary:', err);
       setSummary(null);
     }
@@ -114,11 +126,18 @@ export default function App() {
     const isNewSearch = targetQuery !== lastSearch.query || safeSearch !== lastSearch.safe;
     
     if (!isNewSearch && resultsMap[category].length > 0) {
-      console.log('Using existing results for category:', category);
       return;
     }
 
-    setIsLoading(true);
+    // Abort previous requests if it's a new global search
+    if (isNewSearch) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
+    }
+    
+    const signal = abortControllerRef.current?.signal;
+
+    setLoadingMap(prev => ({ ...prev, [category]: true }));
     setHasSearched(true);
     setError(null);
     
@@ -132,11 +151,10 @@ export default function App() {
       setAggregationsMap(prev => ({ ...prev, [category]: null }));
     }
     
-    const resultsPromise = fetch(`/api/search?q=${encodeURIComponent(targetQuery)}&category=${category}&safe=${safeSearch}`);
-    if (isNewSearch) fetchSummary(targetQuery);
+    const resultsPromise = fetch(`/api/search?q=${encodeURIComponent(targetQuery)}&category=${category}&safe=${safeSearch}`, { signal });
+    if (isNewSearch && signal) fetchSummary(targetQuery, signal);
 
     try {
-      const startTime = Date.now();
       const response = await resultsPromise;
       const text = await response.text();
       
@@ -154,10 +172,11 @@ export default function App() {
       setResultsMap(prev => ({ ...prev, [category]: data.results || [] }));
       setAggregationsMap(prev => ({ ...prev, [category]: data.aggregations || null }));
     } catch (err: any) {
+      if (err.name === 'AbortError') return;
       console.error('Search failed:', err);
       setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {
-      setIsLoading(false);
+      setLoadingMap(prev => ({ ...prev, [category]: false }));
     }
   };
 
@@ -230,10 +249,10 @@ export default function App() {
             />
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={loadingMap[activeTab]}
               className="bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-neon-cyan hover:text-black transition-colors disabled:opacity-50"
             >
-              {isLoading ? <Loader2 className="animate-spin" /> : "Search"}
+              {loadingMap[activeTab] ? <Loader2 className="animate-spin" /> : "Search"}
             </button>
           </motion.form>
           
@@ -283,7 +302,7 @@ export default function App() {
                   ))}
                 </div>
 
-                {currentAggregations && !isLoading && (
+                {currentAggregations && !loadingMap[activeTab] && (
                   <div className="text-[10px] font-bold tracking-widest uppercase text-white/30 flex items-center gap-3">
                     <span>{currentAggregations.count} Results</span>
                     <span className="w-1 h-1 rounded-full bg-white/10" />
@@ -299,7 +318,7 @@ export default function App() {
               </div>
 
               {/* Summary Section */}
-              {summary && activeTab === 'general' && !isLoading && (
+              {summary && activeTab === 'general' && !loadingMap['general'] && (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -339,7 +358,7 @@ export default function App() {
               )}
 
               {/* Error State */}
-              {error && !isLoading && currentResults.length === 0 && (
+              {error && !loadingMap[activeTab] && currentResults.length === 0 && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -357,7 +376,7 @@ export default function App() {
                       onClick={() => handleSearch()}
                       className="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-neon-cyan transition-all flex items-center justify-center gap-2"
                     >
-                      <Loader2 className={cn("w-4 h-4", isLoading && "animate-spin")} />
+                      <Loader2 className={cn("w-4 h-4", loadingMap[activeTab] && "animate-spin")} />
                       Try Again
                     </button>
                   </div>
@@ -371,7 +390,7 @@ export default function App() {
                   ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
                   : "grid-cols-1"
               )}>
-                {isLoading ? (
+                {loadingMap[activeTab] ? (
                   Array.from({ length: 12 }).map((_, i) => (
                     <div key={i} className={cn(
                       "glass rounded-2xl animate-pulse overflow-hidden",

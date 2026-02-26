@@ -1,10 +1,7 @@
 import * as cheerio from 'cheerio';
 
 const SEARXNG_INSTANCES = [
-  "https://search.rhscz.eu",
   "https://searx.tiekoetter.com",
-  "https://opnxng.com",
-  "https://search.inetol.net",
   "https://searx.be",
   "https://priv.au",
   "https://searx.work",
@@ -16,8 +13,6 @@ const SEARXNG_INSTANCES = [
   "https://searx.org",
   "https://search.ononoki.org",
   "https://searx.sethforprivacy.com",
-  "https://searx.tuxcloud.net",
-  "https://searx.gnous.eu",
   "https://searx.mx",
   "https://searx.ctis.me",
   "https://searx.dresden.network",
@@ -29,7 +24,26 @@ const SEARXNG_INSTANCES = [
   "https://searx.oakley.xyz",
   "https://search.bus-hit.me",
   "https://searx.fyi",
-  "https://searx.me"
+  "https://searx.me",
+  "https://searx.uk",
+  "https://searx.net.ua",
+  "https://searx.de",
+  "https://searx.laquadrature.net",
+  "https://searx.nixnet.services",
+  "https://searx.ru",
+  "https://searx.win",
+  "https://searx.gnous.eu",
+  "https://searx.tuxcloud.net",
+  "https://search.rhscz.eu",
+  "https://opnxng.com",
+  "https://search.inetol.net",
+  "https://searx.web-republic.xyz",
+  "https://searx.mastodontech.de",
+  "https://searx.hard-limit.com",
+  "https://searx.ch",
+  "https://searx.cat",
+  "https://searx.bar",
+  "https://searx.pw"
 ];
 
 export async function onRequest(context: any) {
@@ -53,7 +67,7 @@ export async function onRequest(context: any) {
   let enginesUsed: Set<string> = new Set();
   let instanceUsed: string | null = null;
 
-  const maxAttempts = 8;
+  const maxAttempts = 20;
   let attempts = 0;
 
   for (const instance of shuffled) {
@@ -65,12 +79,23 @@ export async function onRequest(context: any) {
       const safeParam = safebased ? '&safesearch=1' : '&safesearch=0';
       const searchUrl = `${instance}/search?q=${encodeURIComponent(query)}&format=json${categoryParam}${safeParam}`;
       
+      const userAgents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+      ];
+      const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+
       const response = await fetch(searchUrl, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "User-Agent": randomUA,
           "Accept": "application/json, text/javascript, */*; q=0.01",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Cache-Control": "no-cache",
+          "Pragma": "no-cache"
         },
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(8000)
       });
 
       if (response.ok) {
@@ -118,9 +143,11 @@ export async function onRequest(context: any) {
         // Scraping fallback
         const htmlResponse = await fetch(`${instance}/search?q=${encodeURIComponent(query)}${categoryParam}${safeParam}`, {
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": randomUA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
           },
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(8000)
         });
 
         if (htmlResponse.ok) {
