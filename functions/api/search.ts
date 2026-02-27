@@ -43,11 +43,56 @@ const SEARXNG_INSTANCES = [
   "https://searx.ch",
   "https://searx.cat",
   "https://searx.bar",
-  "https://searx.pw"
+  "https://searx.pw",
+  "https://searx.neocities.org",
+  "https://searx.rocks",
+  "https://searx.life",
+  "https://searx.work",
+  "https://searx.xyz",
+  "https://searx.info",
+  "https://searx.org",
+  "https://searx.me",
+  "https://searx.be",
+  "https://searx.space",
+  "https://searx.fyi",
+  "https://searx.mx",
+  "https://searx.uk",
+  "https://searx.de",
+  "https://searx.ru",
+  "https://searx.win",
+  "https://searx.laquadrature.net",
+  "https://searx.nixnet.services",
+  "https://searx.net.ua",
+  "https://searx.ctis.me",
+  "https://searx.dresden.network",
+  "https://searx.perennialte.ch",
+  "https://searx.rofl.wtf",
+  "https://searx.daetalytica.io",
+  "https://searx.divided-by-zero.eu",
+  "https://searx.stuehmer.dk",
+  "https://searx.oakley.xyz",
+  "https://search.bus-hit.me",
+  "https://searx.gnous.eu",
+  "https://searx.tuxcloud.net",
+  "https://search.rhscz.eu",
+  "https://opnxng.com",
+  "https://search.inetol.net",
+  "https://searx.web-republic.xyz",
+  "https://searx.mastodontech.de",
+  "https://searx.hard-limit.com",
+  "https://searx.ch",
+  "https://searx.cat",
+  "https://searx.bar",
+  "https://searx.tiekoetter.com",
+  "https://priv.au",
+  "https://searxng.site",
+  "https://searx.prvcy.eu",
+  "https://search.ononoki.org",
+  "https://searx.sethforprivacy.com"
 ];
 
 export async function onRequest(context: any) {
-  const { request, env } = context;
+  const { request } = context;
   const url = new URL(request.url);
   const query = url.searchParams.get("q");
   const category = url.searchParams.get("category") || 'general';
@@ -63,158 +108,146 @@ export async function onRequest(context: any) {
   const startTime = Date.now();
   const shuffled = [...SEARXNG_INSTANCES].sort(() => Math.random() - 0.5);
   
+  // We'll try instances in batches to avoid hitting subrequest limits and CPU limits
+  const BATCH_SIZE = 5;
+  const MAX_BATCHES = 8; // Total 40 attempts
+  
   let results: any[] = [];
   let enginesUsed: Set<string> = new Set();
   let instanceUsed: string | null = null;
 
-  const maxAttempts = 20;
-  let attempts = 0;
+  const userAgents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+  ];
 
-  for (const instance of shuffled) {
-    if (attempts >= maxAttempts) break;
-    attempts++;
+  for (let i = 0; i < MAX_BATCHES; i++) {
+    const batch = shuffled.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+    if (batch.length === 0) break;
     
-    try {
+    const batchPromises = batch.map(async (instance) => {
+      const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
       const categoryParam = category === 'general' ? '' : `&categories=${category}`;
       const safeParam = safebased ? '&safesearch=1' : '&safesearch=0';
       const searchUrl = `${instance}/search?q=${encodeURIComponent(query)}&format=json${categoryParam}${safeParam}`;
-      
-      const userAgents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
-      ];
-      const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-      const response = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": randomUA,
-          "Accept": "application/json, text/javascript, */*; q=0.01",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Cache-Control": "no-cache",
-          "Pragma": "no-cache"
-        },
-        signal: AbortSignal.timeout(8000)
-      });
-
-      if (response.ok) {
-        const text = await response.text();
-        try {
-          const data = JSON.parse(text);
-            if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-              instanceUsed = instance;
-              let filtered = data.results;
-              
-              if (category === 'images') {
-                filtered = data.results.filter((r: any) => 
-                  r.img_src || r.thumbnail || r.template === 'image' || r.category === 'images'
-                );
-              } else if (category === 'videos') {
-                filtered = data.results.filter((r: any) => 
-                  r.template === 'video' || r.category === 'videos' || 
-                  r.url.includes('youtube.com') || r.url.includes('vimeo.com') || r.url.includes('dailymotion.com')
-                );
-              }
-
-              if (filtered.length > 0) {
-                results = filtered.map((r: any) => {
-                  if (r.engine) enginesUsed.add(r.engine);
-                  return {
-                    type: r.category || category,
-                    title: r.title || "No Title",
-                    url: r.url || "#",
-                    snippet: r.content || r.snippet || "",
-                    thumbnail: r.img_src || r.thumbnail || null,
-                    favicon: `https://www.google.com/s2/favicons?domain=${new URL(r.url || "http://localhost").hostname}&sz=32`,
-                    metadata: {
-                      domain: new URL(r.url || "http://localhost").hostname,
-                      engine: r.engine,
-                      score: r.score
-                    }
-                  };
-                });
-                break;
-              }
-            }
-          } catch (e) {}
-        }
-
-        // Scraping fallback
-        const htmlResponse = await fetch(`${instance}/search?q=${encodeURIComponent(query)}${categoryParam}${safeParam}`, {
+      try {
+        const response = await fetch(searchUrl, {
           headers: {
             "User-Agent": randomUA,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
             "Accept-Language": "en-US,en;q=0.9",
           },
           signal: AbortSignal.timeout(8000)
         });
 
-        if (htmlResponse.ok) {
-          const html = await htmlResponse.text();
-          const $ = cheerio.load(html);
-          const scrapedResults: any[] = [];
-          instanceUsed = instance;
+        if (response.ok) {
+          const data: any = await response.json();
+          if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+            let filtered = data.results;
+            if (category === 'images') {
+              filtered = data.results.filter((r: any) => r.img_src || r.thumbnail || r.template === 'image');
+            } else if (category === 'videos') {
+              filtered = data.results.filter((r: any) => r.template === 'video' || r.url.includes('youtube.com') || r.url.includes('vimeo.com') || r.url.includes('dailymotion.com'));
+            }
 
-          const resultSelectors = [
-            "article.result", 
-            ".result", 
-            ".result-default", 
-            ".result-images", 
-            ".result-videos",
-            ".result_container",
-            ".image-result",
-            ".video-result"
-          ];
-          
-          $(resultSelectors.join(", ")).each((_, el) => {
-            const $el = $(el);
-            const $link = $el.find("a.result__a, h3 a, h4 a, .result-header a, .title a, a.image-link").first();
-            if (!$link.length) return;
-
-            let title = $link.text().trim() || $el.find(".title, .result-title").text().trim();
-            let url = $link.attr("href") || "#";
-            if (url.startsWith("/")) try { url = new URL(url, instance).toString(); } catch(e) {}
-
-            const snippet = $el.find("p.result__snippet, .content, .snippet, .result-content, .description").first().text().trim();
-            let thumbnail = $el.find("img").first().attr("src") || 
-                            $el.find("img").first().attr("data-src") ||
-                            $el.find(".image img, .thumbnail img, .result-image img").first().attr("src") || null;
-            
-            if (thumbnail && thumbnail.startsWith("/")) try { thumbnail = new URL(thumbnail, instance).toString(); } catch(e) {}
-
-            let type = category;
-            const isImage = $el.hasClass("result-images") || $el.find(".result-images").length > 0 || $el.hasClass("image-result");
-            const isVideo = $el.hasClass("result-videos") || $el.find(".result-videos").length > 0 || $el.hasClass("video-result") || url.includes('youtube.com');
-
-            if (isImage) type = 'images';
-            else if (isVideo) type = 'videos';
-
-            if (category === 'images' && !isImage && !thumbnail) return;
-            if (category === 'videos' && !isVideo && !url.includes('youtube.com')) return;
-            if (category === 'general' && (isImage || isVideo) && !snippet) return;
-
-            let domain = "unknown";
-            try { domain = new URL(url).hostname; } catch(e) {}
-            
-            scrapedResults.push({
-              type,
-              title: title || "No Title",
-              url,
-              snippet: snippet || "",
-              thumbnail,
-              favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
-              metadata: { domain }
-            });
+            if (filtered.length > 0) {
+              return {
+                instance,
+                results: filtered.map((r: any) => ({
+                  type: r.category || category,
+                  title: r.title || "No Title",
+                  url: r.url || "#",
+                  snippet: r.content || r.snippet || "",
+                  thumbnail: r.img_src || r.thumbnail || null,
+                  favicon: `https://www.google.com/s2/favicons?domain=${new URL(r.url || "http://localhost").hostname}&sz=32`,
+                  metadata: {
+                    domain: new URL(r.url || "http://localhost").hostname,
+                    engine: r.engine,
+                    score: r.score
+                  }
+                })),
+                engines: data.engines || []
+              };
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback to HTML scraping for this instance if JSON fails
+        try {
+          const htmlResponse = await fetch(`${instance}/search?q=${encodeURIComponent(query)}${categoryParam}${safeParam}`, {
+            headers: { 
+              "User-Agent": randomUA,
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            },
+            signal: AbortSignal.timeout(8000)
           });
 
-        if (scrapedResults.length > 0) {
-          results = scrapedResults;
-          break;
-        }
+          if (htmlResponse.ok) {
+            const html = await htmlResponse.text();
+            const $ = cheerio.load(html);
+            const scraped: any[] = [];
+            
+            const selectors = [
+              "article.result", 
+              ".result", 
+              ".result-default", 
+              ".result-images", 
+              ".result-videos",
+              ".result_container",
+              ".image-result",
+              ".video-result"
+            ];
+
+            $(selectors.join(", ")).each((_, el) => {
+              const $el = $(el);
+              const $link = $el.find("a.result__a, h3 a, h4 a, .result-header a, .title a, a.image-link").first();
+              if (!$link.length) return;
+
+              let title = $link.text().trim() || $el.find(".title, .result-title").text().trim();
+              let url = $link.attr("href") || "#";
+              if (url.startsWith("/")) try { url = new URL(url, instance).toString(); } catch(e) {}
+
+              const snippet = $el.find("p.result__snippet, .content, .snippet, .result-content, .description").first().text().trim();
+              let thumbnail = $el.find("img").first().attr("src") || 
+                              $el.find("img").first().attr("data-src") ||
+                              $el.find(".image img, .thumbnail img, .result-image img").first().attr("src") || null;
+              
+              if (thumbnail && thumbnail.startsWith("/")) try { thumbnail = new URL(thumbnail, instance).toString(); } catch(e) {}
+
+              let domain = "unknown";
+              try { domain = new URL(url).hostname; } catch(e) {}
+
+              scraped.push({
+                type: category,
+                title: title || "No Title",
+                url,
+                snippet: snippet || "",
+                thumbnail,
+                favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+                metadata: { domain }
+              });
+            });
+
+            if (scraped.length > 0) {
+              return { instance, results: scraped, engines: [] };
+            }
+          }
+        } catch (innerE) {}
       }
-    } catch (e) {
-      continue;
+      return null;
+    });
+
+    const batchResults = await Promise.all(batchPromises);
+    const successful = batchResults.find(r => r !== null);
+    
+    if (successful) {
+      results = successful.results;
+      instanceUsed = successful.instance;
+      successful.engines.forEach((e: any) => enginesUsed.add(e.name || e));
+      break;
     }
   }
 

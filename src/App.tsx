@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react';
 import { Search, Globe, Image as ImageIcon, Video, Loader2, ExternalLink, Sparkles, Shield, ShieldCheck, Copy, Check, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -194,7 +194,6 @@ export default function App() {
     setTimeout(() => setCopiedUrl(null), 2000);
   };
 
-  const currentResults = resultsMap[activeTab];
   const currentAggregations = aggregationsMap[activeTab];
 
   return (
@@ -357,171 +356,161 @@ export default function App() {
                 </motion.div>
               )}
 
-              {/* Error State */}
-              {error && !loadingMap[activeTab] && currentResults.length === 0 && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="glass border-red-500/30 p-10 rounded-3xl text-center mb-10"
-                >
-                  <div className="bg-red-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Search size={32} className="text-red-500" />
-                  </div>
-                  <h3 className="text-2xl font-bold mb-2 text-white">Search Interrupted</h3>
-                  <p className="text-white/60 max-w-md mx-auto mb-8">
-                    {error}
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                    <button 
-                      onClick={() => handleSearch()}
-                      className="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-neon-cyan transition-all flex items-center justify-center gap-2"
-                    >
-                      <Loader2 className={cn("w-4 h-4", loadingMap[activeTab] && "animate-spin")} />
-                      Try Again
-                    </button>
-                  </div>
-                </motion.div>
-              )}
+              {/* Results List Container */}
+              <div className="relative min-h-[400px]">
+                {(['general', 'images', 'videos'] as Category[]).map((cat) => (
+                  <div 
+                    key={cat}
+                    className={cn(
+                      "w-full transition-all duration-500 ease-in-out",
+                      activeTab === cat ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 absolute top-0 left-0 translate-x-12 pointer-events-none"
+                    )}
+                  >
+                    {/* Error State for this tab */}
+                    {error && !loadingMap[cat] && resultsMap[cat].length === 0 && activeTab === cat && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="glass border-red-500/30 p-10 rounded-3xl text-center mb-10"
+                      >
+                        <div className="bg-red-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                          <Search size={32} className="text-red-500" />
+                        </div>
+                        <h3 className="text-2xl font-bold mb-2 text-white">Search Interrupted</h3>
+                        <p className="text-white/60 max-w-md mx-auto mb-8">{error}</p>
+                        <button 
+                          onClick={() => handleSearch(undefined, cat)}
+                          className="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-neon-cyan transition-all flex items-center justify-center gap-2 mx-auto"
+                        >
+                          <Loader2 className={cn("w-4 h-4", loadingMap[cat] && "animate-spin")} />
+                          Try Again
+                        </button>
+                      </motion.div>
+                    )}
 
-              {/* Results List */}
-              <div className={cn(
-                "grid gap-4 md:gap-6",
-                activeTab === 'images' 
-                  ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
-                  : "grid-cols-1"
-              )}>
-                {loadingMap[activeTab] ? (
-                  Array.from({ length: 12 }).map((_, i) => (
-                    <div key={i} className={cn(
-                      "glass rounded-2xl animate-pulse overflow-hidden",
-                      activeTab === 'images' ? "aspect-square" : "p-4 md:p-6 h-40"
-                    )}>
-                      {activeTab === 'images' ? (
-                        <div className="w-full h-full bg-white/5" />
-                      ) : (
-                        <div className="flex gap-4 md:gap-6 h-full">
-                          <div className="w-24 md:w-40 h-full bg-white/5 rounded-xl hidden sm:block" />
-                          <div className="flex-1 space-y-4">
-                            <div className="h-4 w-1/4 bg-white/5 rounded" />
-                            <div className="h-6 w-3/4 bg-white/5 rounded" />
-                            <div className="h-4 w-full bg-white/5 rounded" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                ) : currentResults.length > 0 ? (
-                  currentResults.map((result, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: Math.min(idx * 0.03, 0.5) }}
-                      className={cn(
-                        "glass rounded-2xl hover:border-white/20 transition-all group overflow-hidden",
-                        activeTab === 'images' ? "p-0" : "p-4 md:p-6"
-                      )}
-                    >
-                      {activeTab === 'images' ? (
-                        <div className="relative aspect-square">
-                          <a 
-                            href={result.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="block w-full h-full"
-                          >
-                            <img 
-                              src={result.thumbnail || result.url} 
-                              alt={result.title}
-                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                              referrerPolicy="no-referrer"
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src = "https://picsum.photos/seed/error/400/400?blur=10";
-                              }}
-                            />
-                          </a>
-                          <div className="absolute top-2 right-2 flex gap-2">
-                            <button 
-                              onClick={() => copyToClipboard(result.url)}
-                              className="p-2 bg-black/50 backdrop-blur-md rounded-lg text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-neon-cyan hover:text-black"
-                            >
-                              {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
-                            </button>
-                          </div>
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end pointer-events-none">
-                            <p className="text-white text-[10px] font-bold line-clamp-2 leading-tight">{result.title}</p>
-                            <p className="text-white/60 text-[8px] uppercase tracking-tighter mt-1">{result.metadata?.domain}</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col sm:flex-row gap-4 md:gap-6 relative">
-                          {result.thumbnail && (
-                            <div className="w-full sm:w-32 md:w-40 h-40 sm:h-32 md:h-40 flex-shrink-0 rounded-xl overflow-hidden border border-white/10 relative group-hover:border-neon-cyan/30 transition-colors">
-                              <img 
-                                src={result.thumbnail} 
-                                alt="" 
-                                className="w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                                loading="lazy"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                              {activeTab === 'videos' && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
-                                  <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white border border-white/30 group-hover:scale-110 transition-transform">
-                                    <Play size={20} fill="currentColor" />
-                                  </div>
+                    {/* Loading State for this tab */}
+                    {loadingMap[cat] && (
+                      <div className={cn(
+                        "grid gap-4 md:gap-6",
+                        cat === 'images' 
+                          ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
+                          : "grid-cols-1"
+                      )}>
+                        {Array.from({ length: 12 }).map((_, i) => (
+                          <div key={i} className={cn(
+                            "glass rounded-2xl animate-pulse overflow-hidden",
+                            cat === 'images' ? "aspect-square" : "p-4 md:p-6 h-40"
+                          )}>
+                            {cat === 'images' ? (
+                              <div className="w-full h-full bg-white/5" />
+                            ) : (
+                              <div className="flex gap-4 md:gap-6 h-full">
+                                <div className="w-24 md:w-40 h-full bg-white/5 rounded-xl hidden sm:block" />
+                                <div className="flex-1 space-y-4">
+                                  <div className="h-4 w-1/4 bg-white/5 rounded" />
+                                  <div className="h-6 w-3/4 bg-white/5 rounded" />
+                                  <div className="h-4 w-full bg-white/5 rounded" />
                                 </div>
-                              )}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <div className="flex items-center gap-2 overflow-hidden">
-                                {result.favicon && (
-                                  <img 
-                                    src={result.favicon} 
-                                    alt="" 
-                                    className="w-3 h-3 rounded-sm flex-shrink-0"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                )}
-                                <p className="text-white/40 text-[9px] font-bold tracking-[0.2em] uppercase truncate">
-                                  {result.metadata?.domain || "web"}
-                                  {result.metadata?.engine && ` • ${result.metadata.engine}`}
-                                </p>
                               </div>
-                              <button 
-                                onClick={() => copyToClipboard(result.url)}
-                                className="text-white/20 hover:text-neon-cyan transition-colors flex-shrink-0"
-                                title="Copy Link"
-                              >
-                                {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
-                              </button>
-                            </div>
-                            <a 
-                              href={result.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-lg md:text-xl font-bold text-neon-cyan hover:underline flex items-center gap-2 mb-2 group-hover:neon-text-cyan transition-all line-clamp-2"
-                            >
-                              {result.title}
-                              <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                            </a>
-                            <p className="text-white/70 leading-relaxed line-clamp-2 md:line-clamp-3 text-xs md:text-sm">{result.snippet}</p>
+                            )}
                           </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  ))
-                ) : !error && hasSearched && (
-                  <div className="col-span-full text-center py-24 glass rounded-3xl">
-                    <p className="text-white/40 text-xl">No results found for "{query}" in {activeTab}</p>
-                    <p className="text-white/20 text-sm mt-2">Try adjusting your search terms or filters</p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Results List for this tab */}
+                    {!loadingMap[cat] && resultsMap[cat].length > 0 && (
+                      <div className={cn(
+                        "grid gap-4 md:gap-6",
+                        cat === 'images' 
+                          ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
+                          : "grid-cols-1"
+                      )}>
+                        {resultsMap[cat].map((result, idx) => (
+                          <motion.div
+                            key={`${cat}-${idx}-${result.url}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: Math.min(idx * 0.02, 0.3) }}
+                            className={cn(
+                              "glass rounded-2xl hover:border-white/20 transition-all group overflow-hidden",
+                              cat === 'images' ? "p-0" : "p-4 md:p-6"
+                            )}
+                          >
+                            {cat === 'images' ? (
+                              <div className="relative aspect-square">
+                                <a href={result.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                                  <img 
+                                    src={result.thumbnail || result.url} 
+                                    alt={result.title}
+                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                    referrerPolicy="no-referrer"
+                                    loading="lazy"
+                                    onError={(e) => { (e.target as HTMLImageElement).src = "https://picsum.photos/seed/error/400/400?blur=10"; }}
+                                  />
+                                </a>
+                                <div className="absolute top-2 right-2 flex gap-2">
+                                  <button 
+                                    onClick={() => copyToClipboard(result.url)}
+                                    className="p-2 bg-black/50 backdrop-blur-md rounded-lg text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-neon-cyan hover:text-black"
+                                  >
+                                    {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
+                                  </button>
+                                </div>
+                                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end pointer-events-none">
+                                  <p className="text-white text-[10px] font-bold line-clamp-2 leading-tight">{result.title}</p>
+                                  <p className="text-white/60 text-[8px] uppercase tracking-tighter mt-1">{result.metadata?.domain}</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col sm:flex-row gap-4 md:gap-6 relative">
+                                {result.thumbnail && (
+                                  <div className="w-full sm:w-32 md:w-40 h-40 sm:h-32 md:h-40 flex-shrink-0 rounded-xl overflow-hidden border border-white/10 relative group-hover:border-neon-cyan/30 transition-colors">
+                                    <img src={result.thumbnail} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                    {cat === 'videos' && (
+                                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
+                                        <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white border border-white/30 group-hover:scale-110 transition-transform">
+                                          <Play size={20} fill="currentColor" />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <div className="flex items-center gap-2 overflow-hidden">
+                                      {result.favicon && <img src={result.favicon} alt="" className="w-3 h-3 rounded-sm flex-shrink-0" referrerPolicy="no-referrer" />}
+                                      <p className="text-white/40 text-[9px] font-bold tracking-[0.2em] uppercase truncate">
+                                        {result.metadata?.domain || "web"}
+                                        {result.metadata?.engine && ` • ${result.metadata.engine}`}
+                                      </p>
+                                    </div>
+                                    <button onClick={() => copyToClipboard(result.url)} className="text-white/20 hover:text-neon-cyan transition-colors flex-shrink-0">
+                                      {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
+                                    </button>
+                                  </div>
+                                  <a href={result.url} target="_blank" rel="noopener noreferrer" className="text-lg md:text-xl font-bold text-neon-cyan hover:underline flex items-center gap-2 mb-2 group-hover:neon-text-cyan transition-all line-clamp-2">
+                                    {result.title}
+                                    <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                  </a>
+                                  <p className="text-white/70 leading-relaxed line-clamp-2 md:line-clamp-3 text-xs md:text-sm">{result.snippet}</p>
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Empty State for this tab */}
+                    {!loadingMap[cat] && resultsMap[cat].length === 0 && !error && hasSearched && activeTab === cat && (
+                      <div className="text-center py-24 glass rounded-3xl">
+                        <p className="text-white/40 text-xl">No results found for "{query}" in {cat}</p>
+                        <p className="text-white/20 text-sm mt-2">Try adjusting your search terms or filters</p>
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
             </motion.div>
           )}
