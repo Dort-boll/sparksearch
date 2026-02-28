@@ -64,6 +64,33 @@ async function startServer() {
     }
   });
 
+  // Search Suggestions API
+  app.get("/api/suggestions", async (req, res) => {
+    const query = req.query.q as string;
+    if (!query || query.length < 2) return res.json([]);
+
+    try {
+      const suggestUrl = `https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(query)}`;
+      const response = await fetch(suggestUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(3000)
+      });
+
+      if (response.ok) {
+        const data: any = await response.json();
+        if (Array.isArray(data) && data[1]) {
+          return res.json(data[1]);
+        }
+      }
+      res.json([]);
+    } catch (err) {
+      console.error('Suggestions fetch failed:', err);
+      res.json([]);
+    }
+  });
+
   app.get("/api/search", async (req, res) => {
     const query = req.query.q as string;
     const category = (req.query.category as string) || 'general';

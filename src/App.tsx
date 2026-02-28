@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type FormEvent, type ReactNode, type KeyboardEvent } from 'react';
 import { Search, Globe, Image as ImageIcon, Video, Loader2, ExternalLink, Sparkles, Shield, ShieldCheck, Copy, Check, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -41,6 +41,9 @@ type Category = 'general' | 'images' | 'videos';
 
 export default function App() {
   const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionIndex, setSuggestionIndex] = useState(-1);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [resultsMap, setResultsMap] = useState<Record<Category, SearchResult[]>>({
     general: [],
     images: [],
@@ -57,7 +60,11 @@ export default function App() {
     images: false,
     videos: false
   });
-  const [error, setError] = useState<string | null>(null);
+  const [errorMap, setErrorMap] = useState<Record<Category, string | null>>({
+    general: null,
+    images: null,
+    videos: null
+  });
   const [hasSearched, setHasSearched] = useState(false);
   const [activeTab, setActiveTab] = useState<Category>('general');
   const [safeSearch, setSafeSearch] = useState(true);
@@ -65,7 +72,70 @@ export default function App() {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const suggestionsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(event.target as Node) && 
+          inputRef.current && !inputRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (query.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setSuggestionIndex(-1);
+      return;
+    }
+
+    if (suggestionsTimeoutRef.current) clearTimeout(suggestionsTimeoutRef.current);
+
+    suggestionsTimeoutRef.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/suggestions?q=${encodeURIComponent(query)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setSuggestions(data);
+          setShowSuggestions(data.length > 0);
+          setSuggestionIndex(-1);
+        }
+      } catch (err) {
+        console.error('Failed to fetch suggestions:', err);
+      }
+    }, 300);
+
+    return () => {
+      if (suggestionsTimeoutRef.current) clearTimeout(suggestionsTimeoutRef.current);
+    };
+  }, [query]);
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (!showSuggestions || suggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSuggestionIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSuggestionIndex(prev => (prev > 0 ? prev - 1 : -1));
+    } else if (e.key === 'Enter' && suggestionIndex >= 0) {
+      e.preventDefault();
+      const selected = suggestions[suggestionIndex];
+      setQuery(selected);
+      setShowSuggestions(false);
+      // Trigger search
+      setTimeout(() => handleSearch(undefined), 0);
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -120,15 +190,16 @@ export default function App() {
     const targetQuery = query.trim();
     if (!targetQuery) return;
 
-    const category = categoryOverride || activeTab;
+    setShowSuggestions(false);
 
-    // Reset results if query or safe search changed
-    const isNewSearch = targetQuery !== lastSearch.query || safeSearch !== lastSearch.safe;
-    
-    if (!isNewSearch && resultsMap[category].length > 0) {
+    // If it's a tab click and we already have results, don't reload
+    if (categoryOverride && resultsMap[categoryOverride].length > 0 && targetQuery === lastSearch.query && safeSearch === lastSearch.safe) {
+      setActiveTab(categoryOverride);
       return;
     }
 
+    const isNewSearch = targetQuery !== lastSearch.query || safeSearch !== lastSearch.safe;
+    
     // Abort previous requests if it's a new global search
     if (isNewSearch) {
       abortControllerRef.current?.abort();
@@ -137,32 +208,38 @@ export default function App() {
     
     const signal = abortControllerRef.current?.signal;
 
-    setLoadingMap(prev => ({ ...prev, [category]: true }));
     setHasSearched(true);
-    setError(null);
     
     if (isNewSearch) {
       setResultsMap({ general: [], images: [], videos: [] });
       setAggregationsMap({ general: null, images: null, videos: null });
       setSummary(null);
+      setErrorMap({ general: null, images: null, videos: null });
       setLastSearch({ query: targetQuery, safe: safeSearch });
-    } else {
-      setResultsMap(prev => ({ ...prev, [category]: [] }));
-      setAggregationsMap(prev => ({ ...prev, [category]: null }));
+      
+      // Load all three in parallel
+      const categories: Category[] = ['general', 'images', 'videos'];
+      categories.forEach(cat => fetchCategory(targetQuery, cat, signal!));
+      fetchSummary(targetQuery, signal!);
+    } else if (categoryOverride) {
+      // Just reload one category if requested specifically
+      fetchCategory(targetQuery, categoryOverride, signal!);
     }
-    
-    const resultsPromise = fetch(`/api/search?q=${encodeURIComponent(targetQuery)}&category=${category}&safe=${safeSearch}`, { signal });
-    if (isNewSearch && signal) fetchSummary(targetQuery, signal);
+  };
+
+  const fetchCategory = async (q: string, category: Category, signal: AbortSignal) => {
+    setLoadingMap(prev => ({ ...prev, [category]: true }));
+    setErrorMap(prev => ({ ...prev, [category]: null }));
 
     try {
-      const response = await resultsPromise;
+      const response = await fetch(`/api/search?q=${encodeURIComponent(q)}&category=${category}&safe=${safeSearch}`, { signal });
       const text = await response.text();
       
       let data: any = {};
       try {
         data = JSON.parse(text);
       } catch (e) {
-        throw new Error(`Server returned invalid response: ${text.slice(0, 50)}...`);
+        throw new Error(`Server returned invalid response`);
       }
       
       if (!response.ok) {
@@ -173,8 +250,8 @@ export default function App() {
       setAggregationsMap(prev => ({ ...prev, [category]: data.aggregations || null }));
     } catch (err: any) {
       if (err.name === 'AbortError') return;
-      console.error('Search failed:', err);
-      setError(err.message || 'An unexpected error occurred. Please try again.');
+      console.error(`Search failed for ${category}:`, err);
+      setErrorMap(prev => ({ ...prev, [category]: err.message || 'An unexpected error occurred.' }));
     } finally {
       setLoadingMap(prev => ({ ...prev, [category]: false }));
     }
@@ -183,7 +260,8 @@ export default function App() {
   const handleTabChange = (tab: Category) => {
     if (tab === activeTab) return;
     setActiveTab(tab);
-    if (hasSearched && resultsMap[tab].length === 0) {
+    // If we don't have results for this tab yet (e.g. failed or not started), we could retry
+    if (hasSearched && resultsMap[tab].length === 0 && !loadingMap[tab]) {
       handleSearch(undefined, tab);
     }
   };
@@ -226,7 +304,7 @@ export default function App() {
         </motion.div>
 
         {/* Search Bar */}
-        <div className="w-full max-w-2xl flex flex-col gap-4">
+        <div className="w-full max-w-2xl flex flex-col gap-4 relative z-50">
           <motion.form 
             layout
             onSubmit={(e) => handleSearch(e)}
@@ -243,17 +321,54 @@ export default function App() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => query.length >= 2 && setShowSuggestions(true)}
+              onKeyDown={handleKeyDown}
               placeholder="Search the decentralized web..."
               className="flex-1 bg-transparent border-none outline-none py-4 text-lg text-white placeholder:text-white/20"
             />
             <button
               type="submit"
-              disabled={loadingMap[activeTab]}
+              disabled={loadingMap.general && loadingMap.images && loadingMap.videos}
               className="bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-neon-cyan hover:text-black transition-colors disabled:opacity-50"
             >
-              {loadingMap[activeTab] ? <Loader2 className="animate-spin" /> : "Search"}
+              {(loadingMap.general || loadingMap.images || loadingMap.videos) ? <Loader2 className="animate-spin" /> : "Search"}
             </button>
           </motion.form>
+
+          {/* Suggestions Dropdown */}
+          <AnimatePresence>
+            {showSuggestions && suggestions.length > 0 && (
+              <motion.div
+                ref={suggestionsRef}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="absolute top-full left-0 right-0 mt-2 glass rounded-2xl overflow-hidden border border-white/10 shadow-2xl z-[100]"
+              >
+                {suggestions.map((suggestion, i) => (
+                  <button
+                    key={i}
+                    onMouseEnter={() => setSuggestionIndex(i)}
+                    onClick={() => {
+                      setQuery(suggestion);
+                      setShowSuggestions(false);
+                      // Trigger search immediately
+                      const fakeEvent = { preventDefault: () => {} } as FormEvent;
+                      // We need to use the new query value directly because state update is async
+                      setTimeout(() => handleSearch(fakeEvent), 0);
+                    }}
+                    className={cn(
+                      "w-full text-left px-6 py-3 text-white/80 transition-colors flex items-center gap-3 border-b border-white/5 last:border-none",
+                      suggestionIndex === i ? "bg-white/10 text-neon-cyan" : "hover:bg-white/5"
+                    )}
+                  >
+                    <Search size={14} className={cn("transition-colors", suggestionIndex === i ? "text-neon-cyan" : "text-white/20")} />
+                    <span className="font-medium">{suggestion}</span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
           
           <div className="flex items-center justify-center gap-6">
             <button 
@@ -367,7 +482,7 @@ export default function App() {
                     )}
                   >
                     {/* Error State for this tab */}
-                    {error && !loadingMap[cat] && resultsMap[cat].length === 0 && activeTab === cat && (
+                    {errorMap[cat] && !loadingMap[cat] && resultsMap[cat].length === 0 && (
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -377,7 +492,7 @@ export default function App() {
                           <Search size={32} className="text-red-500" />
                         </div>
                         <h3 className="text-2xl font-bold mb-2 text-white">Search Interrupted</h3>
-                        <p className="text-white/60 max-w-md mx-auto mb-8">{error}</p>
+                        <p className="text-white/60 max-w-md mx-auto mb-8">{errorMap[cat]}</p>
                         <button 
                           onClick={() => handleSearch(undefined, cat)}
                           className="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-neon-cyan transition-all flex items-center justify-center gap-2 mx-auto"
@@ -503,9 +618,9 @@ export default function App() {
                     )}
 
                     {/* Empty State for this tab */}
-                    {!loadingMap[cat] && resultsMap[cat].length === 0 && !error && hasSearched && activeTab === cat && (
+                    {!loadingMap[cat] && resultsMap[cat].length === 0 && !errorMap[cat] && hasSearched && activeTab === cat && (
                       <div className="text-center py-24 glass rounded-3xl">
-                        <p className="text-white/40 text-xl">No results found for "{query}" in {cat}</p>
+                        <p className="text-white/40 text-xl">No results found for "{lastSearch.query}" in {cat}</p>
                         <p className="text-white/20 text-sm mt-2">Try adjusting your search terms or filters</p>
                       </div>
                     )}
@@ -533,9 +648,10 @@ export default function App() {
       </AnimatePresence>
 
       {/* Footer */}
-      <footer className="fixed bottom-0 left-0 w-full p-6 text-center glass border-t-0 pointer-events-none">
-        <p className="text-white/20 text-xs font-bold tracking-[0.2em] uppercase">
-          Powered by <span className="text-neon-cyan">Vayu AGI</span> • Privacy First Search
+      <footer className="fixed bottom-0 left-0 w-full p-8 text-center glass-strong border-t border-white/5 pointer-events-none z-[60]">
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent -z-10" />
+        <p className="text-white/20 text-[10px] font-bold tracking-[0.3em] uppercase">
+          Powered by <span className="text-neon-cyan neon-text-cyan">Vayu AGI</span> • Privacy First Search
         </p>
       </footer>
     </div>

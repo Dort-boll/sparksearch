@@ -25,6 +25,12 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.glass-strong {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+}
+
 .neon-glow-cyan {
   box-shadow: 0 0 15px rgba(0, 243, 255, 0.3), 0 0 30px rgba(0, 243, 255, 0.1);
 }
