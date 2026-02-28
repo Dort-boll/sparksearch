@@ -3,6 +3,7 @@ import { Search, Globe, Image as ImageIcon, Video, Loader2, ExternalLink, Sparkl
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { GoogleGenAI } from "@google/genai";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -38,6 +39,45 @@ interface SearchAggregations {
 }
 
 type Category = 'general' | 'images' | 'videos';
+
+const SummaryCard = ({ summary }: { summary: InstantAnswer }) => (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    className="glass p-8 rounded-3xl border-neon-cyan/20 neon-glow-cyan/10"
+  >
+    <div className="flex flex-col gap-6">
+      {summary.Image && (
+        <div className="w-full h-48 rounded-2xl overflow-hidden border border-white/10">
+          <img 
+            src={summary.Image.startsWith('http') ? summary.Image : `https://duckduckgo.com${summary.Image}`} 
+            alt={summary.Heading} 
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+      )}
+      <div className="flex-1">
+        <div className="flex items-center gap-2 mb-3">
+          <Sparkles size={16} className="text-neon-cyan" />
+          <span className="text-neon-cyan text-[10px] font-black uppercase tracking-[0.3em]">Intelligence Node</span>
+        </div>
+        <h2 className="text-2xl font-black mb-4 text-white tracking-tight leading-tight">{summary.Heading}</h2>
+        <p className="text-white/60 text-sm leading-relaxed mb-6 font-medium">
+          {summary.AbstractText}
+        </p>
+        <a 
+          href={summary.AbstractURL} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 text-neon-cyan text-xs font-black uppercase tracking-widest hover:underline"
+        >
+          Source: {summary.AbstractSource} <ExternalLink size={12} />
+        </a>
+      </div>
+    </div>
+  </motion.div>
+);
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -250,6 +290,52 @@ export default function App() {
       setAggregationsMap(prev => ({ ...prev, [category]: data.aggregations || null }));
     } catch (err: any) {
       if (err.name === 'AbortError') return;
+      
+      // Gemini Fallback for Images
+      if (category === 'images') {
+        try {
+          const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || (window as any).process?.env?.GEMINI_API_KEY;
+          if (apiKey) {
+            const ai = new GoogleGenAI({ apiKey });
+            const response = await ai.models.generateContent({
+              model: "gemini-3.1-flash-image-preview",
+              contents: `Find high-quality image results for: ${q}. Return a list of image URLs and their source titles.`,
+              config: {
+                tools: [{ 
+                  googleSearch: { 
+                    searchTypes: {
+                      imageSearch: {}
+                    }
+                  } 
+                }]
+              }
+            });
+
+            const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (chunks && chunks.length > 0) {
+              const geminiResults = chunks
+                .filter((c: any) => c.web && (c.web.uri.includes('.jpg') || c.web.uri.includes('.png') || c.web.uri.includes('.webp') || c.web.uri.includes('image')))
+                .map((c: any) => ({
+                  type: 'images',
+                  title: c.web.title || "Image Result",
+                  url: c.web.uri,
+                  snippet: c.web.title,
+                  thumbnail: c.web.uri,
+                  favicon: `https://www.google.com/s2/favicons?domain=${new URL(c.web.uri).hostname}&sz=32`,
+                  metadata: { domain: new URL(c.web.uri).hostname, engine: 'gemini-vision' }
+                }));
+              
+              if (geminiResults.length > 0) {
+                setResultsMap(prev => ({ ...prev, [category]: geminiResults }));
+                return;
+              }
+            }
+          }
+        } catch (geminiErr) {
+          console.error("Gemini Image Fallback failed:", geminiErr);
+        }
+      }
+
       console.error(`Search failed for ${category}:`, err);
       setErrorMap(prev => ({ ...prev, [category]: err.message || 'An unexpected error occurred.' }));
     } finally {
@@ -400,11 +486,11 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="w-full max-w-5xl mt-12 mb-20"
+              className="w-full max-w-[1400px] mt-12 mb-32"
             >
-              {/* Tabs */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 border-b border-white/10 pb-4">
-                <div className="flex gap-4">
+              {/* Tabs & Stats Header */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 border-b border-white/5 pb-6">
+                <div className="flex gap-2 p-1 glass rounded-xl">
                   {[
                     { id: 'general', label: 'Web', icon: Globe },
                     { id: 'images', label: 'Images', icon: ImageIcon },
@@ -414,228 +500,234 @@ export default function App() {
                       key={tab.id}
                       onClick={() => handleTabChange(tab.id as Category)}
                       className={cn(
-                        "flex items-center gap-2 px-4 py-2 rounded-lg transition-all",
+                        "flex items-center gap-2 px-5 py-2.5 rounded-lg transition-all duration-300 font-bold text-sm",
                         activeTab === tab.id 
-                          ? "bg-white/10 text-neon-cyan neon-text-cyan" 
-                          : "text-white/40 hover:text-white/60"
+                          ? "bg-white/10 text-neon-cyan neon-text-cyan shadow-[0_0_20px_rgba(0,243,255,0.1)]" 
+                          : "text-white/30 hover:text-white/60 hover:bg-white/5"
                       )}
                     >
-                      <tab.icon size={18} />
-                      <span className="font-semibold">{tab.label}</span>
+                      <tab.icon size={16} />
+                      <span>{tab.label}</span>
                     </button>
                   ))}
                 </div>
 
                 {currentAggregations && !loadingMap[activeTab] && (
-                  <div className="text-[10px] font-bold tracking-widest uppercase text-white/30 flex items-center gap-3">
-                    <span>{currentAggregations.count} Results</span>
-                    <span className="w-1 h-1 rounded-full bg-white/10" />
-                    <span>{currentAggregations.time}s</span>
-                    {currentAggregations.engines.length > 0 && (
-                      <>
-                        <span className="w-1 h-1 rounded-full bg-white/10" />
-                        <span>{currentAggregations.engines.length} Engines</span>
-                      </>
-                    )}
+                  <div className="hidden md:flex items-center gap-4 px-4 py-2 glass rounded-xl border-white/5">
+                    <div className="flex flex-col items-end">
+                      <span className="text-[10px] font-black tracking-widest uppercase text-white/20">Latency</span>
+                      <span className="text-xs font-mono text-neon-cyan">{currentAggregations.time}s</span>
+                    </div>
+                    <div className="w-px h-8 bg-white/10" />
+                    <div className="flex flex-col items-end">
+                      <span className="text-[10px] font-black tracking-widest uppercase text-white/20">Nodes</span>
+                      <span className="text-xs font-mono text-white/80">{currentAggregations.engines.length || 1}</span>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Summary Section */}
-              {summary && activeTab === 'general' && !loadingMap['general'] && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="glass p-8 rounded-3xl mb-10 border-neon-cyan/20 neon-glow-cyan/10"
-                >
-                  <div className="flex flex-col md:flex-row gap-8">
-                    {summary.Image && (
-                      <div className="w-full md:w-48 h-48 flex-shrink-0 rounded-2xl overflow-hidden border border-white/10">
-                        <img 
-                          src={summary.Image.startsWith('http') ? summary.Image : `https://duckduckgo.com${summary.Image}`} 
-                          alt={summary.Heading} 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                    )}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Sparkles size={16} className="text-neon-cyan" />
-                        <span className="text-neon-cyan text-xs font-bold uppercase tracking-widest">Instant Answer</span>
-                      </div>
-                      <h2 className="text-3xl font-black mb-4 text-white">{summary.Heading}</h2>
-                      <p className="text-white/80 text-lg leading-relaxed mb-6">
-                        {summary.AbstractText}
-                      </p>
-                      <a 
-                        href={summary.AbstractURL} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 text-neon-cyan font-bold hover:underline"
-                      >
-                        Source: {summary.AbstractSource} <ExternalLink size={14} />
-                      </a>
+              {/* Main Content Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-10 items-start">
+                
+                {/* Left Column: Results */}
+                <div className="space-y-8 min-w-0">
+                  {/* Mobile Summary (shown only on small screens) */}
+                  {summary && activeTab === 'general' && !loadingMap['general'] && (
+                    <div className="lg:hidden">
+                      <SummaryCard summary={summary} />
                     </div>
-                  </div>
-                </motion.div>
-              )}
+                  )}
 
-              {/* Results List Container */}
-              <div className="relative min-h-[400px]">
-                {(['general', 'images', 'videos'] as Category[]).map((cat) => (
-                  <div 
-                    key={cat}
-                    className={cn(
-                      "w-full transition-all duration-500 ease-in-out",
-                      activeTab === cat ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 absolute top-0 left-0 translate-x-12 pointer-events-none"
-                    )}
-                  >
-                    {/* Error State for this tab */}
-                    {errorMap[cat] && !loadingMap[cat] && resultsMap[cat].length === 0 && (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="glass border-red-500/30 p-10 rounded-3xl text-center mb-10"
+                  <div className="relative min-h-[400px]">
+                    {(['general', 'images', 'videos'] as Category[]).map((cat) => (
+                      <div 
+                        key={cat}
+                        className={cn(
+                          "w-full transition-all duration-500 ease-in-out",
+                          activeTab === cat ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 absolute top-0 left-0 translate-x-12 pointer-events-none"
+                        )}
                       >
-                        <div className="bg-red-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-                          <Search size={32} className="text-red-500" />
-                        </div>
-                        <h3 className="text-2xl font-bold mb-2 text-white">Search Interrupted</h3>
-                        <p className="text-white/60 max-w-md mx-auto mb-8">{errorMap[cat]}</p>
-                        <button 
-                          onClick={() => handleSearch(undefined, cat)}
-                          className="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-neon-cyan transition-all flex items-center justify-center gap-2 mx-auto"
-                        >
-                          <Loader2 className={cn("w-4 h-4", loadingMap[cat] && "animate-spin")} />
-                          Try Again
-                        </button>
-                      </motion.div>
-                    )}
-
-                    {/* Loading State for this tab */}
-                    {loadingMap[cat] && (
-                      <div className={cn(
-                        "grid gap-4 md:gap-6",
-                        cat === 'images' 
-                          ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
-                          : "grid-cols-1"
-                      )}>
-                        {Array.from({ length: 12 }).map((_, i) => (
-                          <div key={i} className={cn(
-                            "glass rounded-2xl animate-pulse overflow-hidden",
-                            cat === 'images' ? "aspect-square" : "p-4 md:p-6 h-40"
-                          )}>
-                            {cat === 'images' ? (
-                              <div className="w-full h-full bg-white/5" />
-                            ) : (
-                              <div className="flex gap-4 md:gap-6 h-full">
-                                <div className="w-24 md:w-40 h-full bg-white/5 rounded-xl hidden sm:block" />
-                                <div className="flex-1 space-y-4">
-                                  <div className="h-4 w-1/4 bg-white/5 rounded" />
-                                  <div className="h-6 w-3/4 bg-white/5 rounded" />
-                                  <div className="h-4 w-full bg-white/5 rounded" />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Results List for this tab */}
-                    {!loadingMap[cat] && resultsMap[cat].length > 0 && (
-                      <div className={cn(
-                        "grid gap-4 md:gap-6",
-                        cat === 'images' 
-                          ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
-                          : "grid-cols-1"
-                      )}>
-                        {resultsMap[cat].map((result, idx) => (
+                        {/* Error State for this tab */}
+                        {errorMap[cat] && !loadingMap[cat] && resultsMap[cat].length === 0 && (
                           <motion.div
-                            key={`${cat}-${idx}-${result.url}`}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: Math.min(idx * 0.02, 0.3) }}
-                            className={cn(
-                              "glass rounded-2xl hover:border-white/20 transition-all group overflow-hidden",
-                              cat === 'images' ? "p-0" : "p-4 md:p-6"
-                            )}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="glass border-red-500/30 p-10 rounded-3xl text-center mb-10"
                           >
-                            {cat === 'images' ? (
-                              <div className="relative aspect-square">
-                                <a href={result.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                                  <img 
-                                    src={result.thumbnail || result.url} 
-                                    alt={result.title}
-                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                    referrerPolicy="no-referrer"
-                                    loading="lazy"
-                                    onError={(e) => { (e.target as HTMLImageElement).src = "https://picsum.photos/seed/error/400/400?blur=10"; }}
-                                  />
-                                </a>
-                                <div className="absolute top-2 right-2 flex gap-2">
-                                  <button 
-                                    onClick={() => copyToClipboard(result.url)}
-                                    className="p-2 bg-black/50 backdrop-blur-md rounded-lg text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-neon-cyan hover:text-black"
-                                  >
-                                    {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
-                                  </button>
-                                </div>
-                                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end pointer-events-none">
-                                  <p className="text-white text-[10px] font-bold line-clamp-2 leading-tight">{result.title}</p>
-                                  <p className="text-white/60 text-[8px] uppercase tracking-tighter mt-1">{result.metadata?.domain}</p>
-                                </div>
+                            <div className="bg-red-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                              <Search size={32} className="text-red-500" />
+                            </div>
+                            <h3 className="text-2xl font-bold mb-2 text-white">Search Interrupted</h3>
+                            <p className="text-white/60 max-w-md mx-auto mb-8">{errorMap[cat]}</p>
+                            <button 
+                              onClick={() => handleSearch(undefined, cat)}
+                              className="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-neon-cyan transition-all flex items-center justify-center gap-2 mx-auto"
+                            >
+                              <Loader2 className={cn("w-4 h-4", loadingMap[cat] && "animate-spin")} />
+                              Try Again
+                            </button>
+                          </motion.div>
+                        )}
+
+                        {/* Loading State for this tab */}
+                        {loadingMap[cat] && (
+                          <div className={cn(
+                            "grid gap-6",
+                            cat === 'images' 
+                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4" 
+                              : "grid-cols-1"
+                          )}>
+                            {Array.from({ length: 8 }).map((_, i) => (
+                              <div key={i} className={cn(
+                                "glass rounded-2xl animate-pulse overflow-hidden",
+                                cat === 'images' ? "aspect-square" : "p-6 h-48"
+                              )}>
+                                <div className="w-full h-full bg-white/5" />
                               </div>
-                            ) : (
-                              <div className="flex flex-col sm:flex-row gap-4 md:gap-6 relative">
-                                {result.thumbnail && (
-                                  <div className="w-full sm:w-32 md:w-40 h-40 sm:h-32 md:h-40 flex-shrink-0 rounded-xl overflow-hidden border border-white/10 relative group-hover:border-neon-cyan/30 transition-colors">
-                                    <img src={result.thumbnail} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                    {cat === 'videos' && (
-                                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
-                                        <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white border border-white/30 group-hover:scale-110 transition-transform">
-                                          <Play size={20} fill="currentColor" />
-                                        </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Results List for this tab */}
+                        {!loadingMap[cat] && resultsMap[cat].length > 0 && (
+                          <div className={cn(
+                            "grid gap-6",
+                            cat === 'images' 
+                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4" 
+                              : "grid-cols-1"
+                          )}>
+                            {resultsMap[cat].map((result, idx) => (
+                              <motion.div
+                                key={`${cat}-${idx}-${result.url}`}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: Math.min(idx * 0.02, 0.3) }}
+                                className={cn(
+                                  "glass rounded-2xl hover:border-white/20 transition-all group overflow-hidden",
+                                  cat === 'images' ? "p-0" : "p-5 md:p-7"
+                                )}
+                              >
+                                {cat === 'images' ? (
+                                  <div className="relative aspect-square">
+                                    <a href={result.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                                      <img 
+                                        src={result.thumbnail || result.url} 
+                                        alt={result.title}
+                                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                                        referrerPolicy="no-referrer"
+                                        loading="lazy"
+                                        onError={(e) => { (e.target as HTMLImageElement).src = "https://picsum.photos/seed/error/400/400?blur=10"; }}
+                                      />
+                                    </a>
+                                    <div className="absolute top-2 right-2 flex gap-2">
+                                      <button 
+                                        onClick={() => copyToClipboard(result.url)}
+                                        className="p-2 bg-black/50 backdrop-blur-md rounded-lg text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-neon-cyan hover:text-black"
+                                      >
+                                        {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
+                                      </button>
+                                    </div>
+                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end pointer-events-none">
+                                      <p className="text-white text-[10px] font-bold line-clamp-2 leading-tight">{result.title}</p>
+                                      <p className="text-white/60 text-[8px] uppercase tracking-tighter mt-1">{result.metadata?.domain}</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col sm:flex-row gap-6 relative">
+                                    {result.thumbnail && (
+                                      <div className="w-full sm:w-32 md:w-44 h-44 sm:h-32 md:h-44 flex-shrink-0 rounded-xl overflow-hidden border border-white/10 relative group-hover:border-neon-cyan/30 transition-colors">
+                                        <img src={result.thumbnail} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                        {cat === 'videos' && (
+                                          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
+                                            <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white border border-white/30 group-hover:scale-110 transition-transform">
+                                              <Play size={24} fill="currentColor" />
+                                            </div>
+                                          </div>
+                                        )}
                                       </div>
                                     )}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center justify-between gap-2 mb-3">
+                                        <div className="flex items-center gap-2 overflow-hidden">
+                                          {result.favicon && <img src={result.favicon} alt="" className="w-4 h-4 rounded-sm flex-shrink-0" referrerPolicy="no-referrer" />}
+                                          <p className="text-white/30 text-[10px] font-black tracking-[0.2em] uppercase truncate">
+                                            {result.metadata?.domain || "web"}
+                                            {result.metadata?.engine && ` • ${result.metadata.engine}`}
+                                          </p>
+                                        </div>
+                                        <button onClick={() => copyToClipboard(result.url)} className="text-white/10 hover:text-neon-cyan transition-colors flex-shrink-0">
+                                          {copiedUrl === result.url ? <Check size={16} /> : <Copy size={16} />}
+                                        </button>
+                                      </div>
+                                      <a href={result.url} target="_blank" rel="noopener noreferrer" className="text-xl md:text-2xl font-black text-neon-cyan hover:underline flex items-center gap-2 mb-3 group-hover:neon-text-cyan transition-all line-clamp-2 tracking-tight">
+                                        {result.title}
+                                        <ExternalLink size={16} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                      </a>
+                                      <p className="text-white/60 leading-relaxed line-clamp-2 md:line-clamp-3 text-sm md:text-base font-medium">{result.snippet}</p>
+                                    </div>
                                   </div>
                                 )}
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between gap-2 mb-2">
-                                    <div className="flex items-center gap-2 overflow-hidden">
-                                      {result.favicon && <img src={result.favicon} alt="" className="w-3 h-3 rounded-sm flex-shrink-0" referrerPolicy="no-referrer" />}
-                                      <p className="text-white/40 text-[9px] font-bold tracking-[0.2em] uppercase truncate">
-                                        {result.metadata?.domain || "web"}
-                                        {result.metadata?.engine && ` • ${result.metadata.engine}`}
-                                      </p>
-                                    </div>
-                                    <button onClick={() => copyToClipboard(result.url)} className="text-white/20 hover:text-neon-cyan transition-colors flex-shrink-0">
-                                      {copiedUrl === result.url ? <Check size={14} /> : <Copy size={14} />}
-                                    </button>
-                                  </div>
-                                  <a href={result.url} target="_blank" rel="noopener noreferrer" className="text-lg md:text-xl font-bold text-neon-cyan hover:underline flex items-center gap-2 mb-2 group-hover:neon-text-cyan transition-all line-clamp-2">
-                                    {result.title}
-                                    <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                                  </a>
-                                  <p className="text-white/70 leading-relaxed line-clamp-2 md:line-clamp-3 text-xs md:text-sm">{result.snippet}</p>
-                                </div>
-                              </div>
-                            )}
-                          </motion.div>
+                              </motion.div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Empty State for this tab */}
+                        {!loadingMap[cat] && resultsMap[cat].length === 0 && !errorMap[cat] && hasSearched && activeTab === cat && (
+                          <div className="text-center py-32 glass rounded-3xl">
+                            <p className="text-white/40 text-xl font-bold">No results found for "{lastSearch.query}"</p>
+                            <p className="text-white/20 text-sm mt-3">Try adjusting your search terms or filters</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right Column: Sidebar (Desktop Only) */}
+                <aside className="hidden lg:block sticky top-8 space-y-8">
+                  {summary && activeTab === 'general' && !loadingMap['general'] && (
+                    <SummaryCard summary={summary} />
+                  )}
+
+                  {/* Quick Stats Card */}
+                  <div className="glass p-8 rounded-3xl border-white/5">
+                    <h3 className="text-white/20 text-[10px] font-black tracking-[0.3em] uppercase mb-6">Search Intelligence</h3>
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/40 text-sm">Safe Search</span>
+                        <span className={cn("text-xs font-bold px-2 py-1 rounded-md", safeSearch ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500")}>
+                          {safeSearch ? "ACTIVE" : "DISABLED"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/40 text-sm">Privacy Shield</span>
+                        <span className="text-xs font-bold px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan">ENCRYPTED</span>
+                      </div>
+                      <div className="pt-6 border-t border-white/5">
+                        <p className="text-white/30 text-[10px] leading-relaxed italic">
+                          Spark Search aggregates results from multiple decentralized nodes to ensure your identity remains protected.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Engine Distribution */}
+                  {currentAggregations && currentAggregations.engines.length > 0 && (
+                    <div className="glass p-8 rounded-3xl border-white/5">
+                      <h3 className="text-white/20 text-[10px] font-black tracking-[0.3em] uppercase mb-6">Node Distribution</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {currentAggregations.engines.map((engine, i) => (
+                          <span key={i} className="px-3 py-1.5 glass rounded-lg text-[10px] font-bold text-white/50 border-white/5">
+                            {engine}
+                          </span>
                         ))}
                       </div>
-                    )}
+                    </div>
+                  )}
+                </aside>
 
-                    {/* Empty State for this tab */}
-                    {!loadingMap[cat] && resultsMap[cat].length === 0 && !errorMap[cat] && hasSearched && activeTab === cat && (
-                      <div className="text-center py-24 glass rounded-3xl">
-                        <p className="text-white/40 text-xl">No results found for "{lastSearch.query}" in {cat}</p>
-                        <p className="text-white/20 text-sm mt-2">Try adjusting your search terms or filters</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
               </div>
             </motion.div>
           )}
@@ -646,13 +738,13 @@ export default function App() {
       <AnimatePresence>
         {showScrollTop && (
           <motion.button
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20 }}
             onClick={scrollToTop}
-            className="fixed bottom-24 right-8 p-4 glass rounded-2xl text-neon-cyan hover:bg-white/10 transition-all z-50 shadow-2xl border border-white/10"
+            className="fixed bottom-32 right-8 p-4 glass rounded-2xl text-neon-cyan hover:bg-neon-cyan/10 transition-all z-50 shadow-[0_0_30px_rgba(0,243,255,0.2)] border border-neon-cyan/20 group"
           >
-            <Search className="rotate-180" size={24} />
+            <Search className="rotate-180 group-hover:-translate-y-1 transition-transform" size={24} />
           </motion.button>
         )}
       </AnimatePresence>

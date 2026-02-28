@@ -2,38 +2,43 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import * as cheerio from "cheerio";
 
-const SEARXNG_INSTANCES = [
-  "https://search.rhscz.eu",
-  "https://searx.tiekoetter.com",
-  "https://opnxng.com",
-  "https://search.inetol.net",
+const SEARXNG_INSTANCES = Array.from(new Set([
   "https://searx.be",
+  "https://searxng.site",
   "https://priv.au",
   "https://searx.work",
-  "https://searxng.site",
+  "https://search.inetol.net",
+  "https://opnxng.com",
+  "https://searx.tiekoetter.com",
+  "https://search.rhscz.eu",
   "https://searx.xyz",
-  "https://searx.prvcy.eu",
   "https://searx.space",
   "https://searx.info",
-  "https://searx.org",
-  "https://search.ononoki.org",
+  "https://searx.mx",
+  "https://searx.divided-by-zero.eu",
+  "https://searx.stuehmer.dk",
+  "https://search.bus-hit.me",
+  "https://searx.fyi",
   "https://searx.sethforprivacy.com",
   "https://searx.tuxcloud.net",
   "https://searx.gnous.eu",
-  "https://searx.mx",
   "https://searx.ctis.me",
   "https://searx.dresden.network",
   "https://searx.perennialte.ch",
   "https://searx.rofl.wtf",
   "https://searx.daetalytica.io",
-  "https://searx.work",
-  "https://searx.divided-by-zero.eu",
-  "https://searx.stuehmer.dk",
   "https://searx.oakley.xyz",
-  "https://search.bus-hit.me",
-  "https://searx.fyi",
-  "https://searx.me"
-];
+  "https://searx.org",
+  "https://search.ononoki.org",
+  "https://searx.prvcy.eu",
+  "https://searx.mha.fi",
+  "https://searx.namei.net.au",
+  "https://searx.ninja",
+  "https://searx.ru",
+  "https://searx.haxtrax.com",
+  "https://searx.lre.io",
+  "https://searx.be"
+]));
 
 // Simple In-Memory Cache for Search Results
 const searchCache = new Map<string, { data: any, timestamp: number }>();
@@ -115,74 +120,91 @@ async function startServer() {
     let instanceUsed: string | null = null;
 
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = category === 'images' ? 25 : 15; // Even more attempts for images
 
     for (const instance of shuffled) {
       if (attempts >= maxAttempts) break;
       attempts++;
       
       try {
-        const categoryParam = category === 'general' ? '' : `&categories=${category}`;
-        const safeParam = safebased ? '&safesearch=1' : '&safesearch=0';
-        const searchUrl = `${instance}/search?q=${encodeURIComponent(query)}&format=json${categoryParam}${safeParam}`;
+        // Try both 'images' and 'it' (some instances use 'it' for images)
+        // Also try adding specific engines if it's an image search
+        const categoriesToTry = category === 'images' ? ['images', 'it'] : [category === 'general' ? '' : category];
         
-        const response = await fetch(searchUrl, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "en-US,en;q=0.9",
-          },
-          signal: AbortSignal.timeout(8000)
-        });
+        for (const catName of categoriesToTry) {
+          const categoryParam = catName ? `&categories=${catName}` : '';
+          // Try with and without specific engines
+          const engineParams = category === 'images' 
+            ? ['&engines=google images,bing images,duckduckgo images,qwant images', ''] 
+            : [''];
+          
+          for (const engineParam of engineParams) {
+            const safeParam = safebased ? '&safesearch=1' : '&safesearch=0';
+            const searchUrl = `${instance}/search?q=${encodeURIComponent(query)}&format=json${categoryParam}${engineParam}${safeParam}`;
+            
+            const response = await fetch(searchUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+              },
+              signal: AbortSignal.timeout(category === 'images' ? 15000 : 10000)
+            });
 
-        if (response.ok) {
-          const contentType = response.headers.get("content-type");
-          if (contentType && contentType.includes("application/json")) {
-            const text = await response.text();
-            try {
-              const data = JSON.parse(text);
-              if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-                instanceUsed = instance;
-                // Strict filtering based on category
-                let filtered = data.results;
-                if (category === 'images') {
-                  filtered = data.results.filter((r: any) => 
-                    r.img_src || r.thumbnail || r.template === 'image' || r.category === 'images'
-                  );
-                } else if (category === 'videos') {
-                  filtered = data.results.filter((r: any) => 
-                    r.template === 'video' || r.category === 'videos' || 
-                    r.url.includes('youtube.com') || r.url.includes('vimeo.com') || r.url.includes('dailymotion.com')
-                  );
-                }
+            if (response.ok) {
+              const contentType = response.headers.get("content-type");
+              if (contentType && contentType.includes("application/json")) {
+                const text = await response.text();
+                try {
+                  const data = JSON.parse(text);
+                  if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+                    instanceUsed = instance;
+                    // Strict filtering based on category
+                    let filtered = data.results;
+                    if (category === 'images') {
+                      filtered = data.results.filter((r: any) => 
+                        r.img_src || r.thumbnail || r.template === 'image' || r.category === 'images' || r.content?.includes('img') || r.engine?.includes('images')
+                      );
+                    } else if (category === 'videos') {
+                      filtered = data.results.filter((r: any) => 
+                        r.template === 'video' || r.category === 'videos' || 
+                        r.url.includes('youtube.com') || r.url.includes('vimeo.com') || r.url.includes('dailymotion.com')
+                      );
+                    }
 
-                if (filtered.length > 0) {
-                  results = filtered.map((r: any) => {
-                    if (r.engine) enginesUsed.add(r.engine);
-                    return {
-                      type: r.category || category,
-                      title: r.title || "No Title",
-                      url: r.url || "#",
-                      snippet: r.content || r.snippet || "",
-                      thumbnail: r.img_src || r.thumbnail || null,
-                      favicon: `https://www.google.com/s2/favicons?domain=${new URL(r.url || "http://localhost").hostname}&sz=32`,
-                      metadata: {
-                        domain: new URL(r.url || "http://localhost").hostname,
-                        engine: r.engine,
-                        score: r.score
-                      }
-                    };
-                  });
-                  break;
+                    if (filtered.length > 0) {
+                      results = filtered.map((r: any) => {
+                        if (r.engine) enginesUsed.add(r.engine);
+                        return {
+                          type: r.category || category,
+                          title: r.title || "No Title",
+                          url: r.url || "#",
+                          snippet: r.content || r.snippet || "",
+                          thumbnail: r.img_src || r.thumbnail || null,
+                          favicon: `https://www.google.com/s2/favicons?domain=${new URL(r.url || "http://localhost").hostname}&sz=32`,
+                          metadata: {
+                            domain: new URL(r.url || "http://localhost").hostname,
+                            engine: r.engine,
+                            score: r.score
+                          }
+                        };
+                      });
+                      break;
+                    }
+                  }
+                } catch (jsonErr) {
+                  // Ignore parse errors from specific nodes
                 }
               }
-            } catch (jsonErr) {
-              console.warn(`JSON parse error from ${instance}:`, text.slice(0, 100));
             }
+            if (results.length > 0) break;
           }
+          if (results.length > 0) break;
         }
+        if (results.length > 0) break;
 
         // Fallback to HTML scraping
+        const categoryParam = category === 'general' ? '' : `&categories=${category}`;
+        const safeParam = safebased ? '&safesearch=1' : '&safesearch=0';
         const htmlResponse = await fetch(`${instance}/search?q=${encodeURIComponent(query)}${categoryParam}${safeParam}`, {
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -258,6 +280,41 @@ async function startServer() {
         }
       } catch (e) {
         continue;
+      }
+    }
+
+    if (results.length === 0 && category === 'images') {
+      // Fallback: Try general category on multiple instances but extract images
+      for (const fallbackInstance of shuffled.slice(0, 8)) {
+        try {
+          const safeParam = safebased ? '&safesearch=1' : '&safesearch=0';
+          const fallbackUrl = `${fallbackInstance}/search?q=${encodeURIComponent(query)}&format=json${safeParam}`;
+          const fbResponse = await fetch(fallbackUrl, {
+            headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+            signal: AbortSignal.timeout(10000)
+          });
+          if (fbResponse.ok) {
+            const fbData = await fbResponse.json();
+            if (fbData.results) {
+              const extracted = fbData.results
+                .filter((r: any) => r.img_src || r.thumbnail)
+                .map((r: any) => ({
+                  type: 'images',
+                  title: r.title || "No Title",
+                  url: r.url || "#",
+                  snippet: r.content || "",
+                  thumbnail: r.img_src || r.thumbnail,
+                  favicon: `https://www.google.com/s2/favicons?domain=${new URL(r.url || "http://localhost").hostname}&sz=32`,
+                  metadata: { domain: new URL(r.url || "http://localhost").hostname, engine: r.engine }
+                }));
+              if (extracted.length > 0) {
+                results = extracted;
+                instanceUsed = fallbackInstance;
+                break;
+              }
+            }
+          }
+        } catch (e) {}
       }
     }
 
