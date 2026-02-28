@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode, type KeyboardEvent } from 'react';
-import { Search, Globe, Image as ImageIcon, Video, Loader2, ExternalLink, Sparkles, Shield, ShieldCheck, Copy, Check, Play } from 'lucide-react';
+import { Search, Globe, Image as ImageIcon, Video, Loader2, ExternalLink, Sparkles, Shield, ShieldCheck, Copy, Check, Play, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -54,6 +54,7 @@ const SummaryCard = ({ summary }: { summary: InstantAnswer }) => (
             alt={summary.Heading} 
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         </div>
       )}
@@ -110,6 +111,7 @@ export default function App() {
   const [safeSearch, setSafeSearch] = useState(true);
   const [lastSearch, setLastSearch] = useState({ query: '', safe: true });
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const suggestionsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -294,7 +296,9 @@ export default function App() {
       // Gemini Fallback for Images
       if (category === 'images') {
         try {
-          const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || (window as any).process?.env?.GEMINI_API_KEY;
+          const apiKey = (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY || process.env.API_KEY : undefined) || 
+                         (window as any).process?.env?.GEMINI_API_KEY || 
+                         (import.meta as any).env?.VITE_GEMINI_API_KEY;
           if (apiKey) {
             const ai = new GoogleGenAI({ apiKey });
             const response = await ai.models.generateContent({
@@ -336,6 +340,105 @@ export default function App() {
         }
       }
 
+      // Gemini Fallback for Videos
+      if (category === 'videos') {
+        try {
+          const apiKey = (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY || process.env.API_KEY : undefined) || 
+                         (window as any).process?.env?.GEMINI_API_KEY || 
+                         (import.meta as any).env?.VITE_GEMINI_API_KEY;
+          if (apiKey) {
+            const ai = new GoogleGenAI({ apiKey });
+            const response = await ai.models.generateContent({
+              model: "gemini-3.1-flash-preview",
+              contents: `Find high-quality video results for: ${q}. Return a list of video URLs (YouTube, Vimeo, etc.) and their source titles.`,
+              config: {
+                tools: [{ 
+                  googleSearch: {} 
+                }]
+              }
+            });
+
+            const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (chunks && chunks.length > 0) {
+              const geminiResults = chunks
+                .filter((c: any) => c.web && (c.web.uri.includes('youtube.com') || c.web.uri.includes('youtu.be') || c.web.uri.includes('vimeo.com') || c.web.uri.includes('dailymotion.com') || c.web.uri.includes('video')))
+                .map((c: any) => {
+                  let thumb = null;
+                  try {
+                    const url = new URL(c.web.uri);
+                    if (url.hostname.includes('youtube.com')) {
+                      const v = url.searchParams.get('v');
+                      if (v) thumb = `https://img.youtube.com/vi/${v}/0.jpg`;
+                    } else if (url.hostname.includes('youtu.be')) {
+                      const v = url.pathname.slice(1);
+                      if (v) thumb = `https://img.youtube.com/vi/${v}/0.jpg`;
+                    }
+                  } catch (e) {}
+                  
+                  return {
+                    type: 'videos',
+                    title: c.web.title || "Video Result",
+                    url: c.web.uri,
+                    snippet: c.web.title,
+                    thumbnail: thumb,
+                    favicon: `https://www.google.com/s2/favicons?domain=${new URL(c.web.uri).hostname}&sz=32`,
+                    metadata: { domain: new URL(c.web.uri).hostname, engine: 'gemini-vision' }
+                  };
+                });
+              
+              if (geminiResults.length > 0) {
+                setResultsMap(prev => ({ ...prev, [category]: geminiResults }));
+                return;
+              }
+            }
+          }
+        } catch (geminiErr) {
+          console.error("Gemini Video Fallback failed:", geminiErr);
+        }
+      }
+
+      // Gemini Fallback for General
+      if (category === 'general') {
+        try {
+          const apiKey = (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY || process.env.API_KEY : undefined) || 
+                         (window as any).process?.env?.GEMINI_API_KEY || 
+                         (import.meta as any).env?.VITE_GEMINI_API_KEY;
+          if (apiKey) {
+            const ai = new GoogleGenAI({ apiKey });
+            const response = await ai.models.generateContent({
+              model: "gemini-3.1-flash-preview",
+              contents: `Search for: ${q}. Provide a list of relevant web results with titles, URLs, and brief snippets.`,
+              config: {
+                tools: [{ 
+                  googleSearch: {} 
+                }]
+              }
+            });
+
+            const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (chunks && chunks.length > 0) {
+              const geminiResults = chunks
+                .filter((c: any) => c.web)
+                .map((c: any) => ({
+                  type: 'general',
+                  title: c.web.title || "Web Result",
+                  url: c.web.uri,
+                  snippet: c.web.title,
+                  favicon: `https://www.google.com/s2/favicons?domain=${new URL(c.web.uri).hostname}&sz=32`,
+                  metadata: { domain: new URL(c.web.uri).hostname, engine: 'gemini-search' }
+                }));
+              
+              if (geminiResults.length > 0) {
+                setResultsMap(prev => ({ ...prev, [category]: geminiResults }));
+                return;
+              }
+            }
+          }
+        } catch (geminiErr) {
+          console.error("Gemini General Fallback failed:", geminiErr);
+        }
+      }
+
       console.error(`Search failed for ${category}:`, err);
       setErrorMap(prev => ({ ...prev, [category]: err.message || 'An unexpected error occurred.' }));
     } finally {
@@ -355,7 +458,11 @@ export default function App() {
   const copyToClipboard = (url: string) => {
     navigator.clipboard.writeText(url);
     setCopiedUrl(url);
-    setTimeout(() => setCopiedUrl(null), 2000);
+    setShowToast(true);
+    setTimeout(() => {
+      setCopiedUrl(null);
+      setShowToast(false);
+    }, 2000);
   };
 
   const currentAggregations = aggregationsMap[activeTab];
@@ -372,6 +479,21 @@ export default function App() {
       <div className="blob blob-1 scale-150 blur-[120px]" />
       <div className="blob blob-2 scale-150 blur-[120px]" />
       <div className="fixed inset-0 bg-[#050505] -z-20" />
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {showToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] glass px-6 py-3 rounded-2xl border-neon-cyan/30 flex items-center gap-3 shadow-[0_0_50px_rgba(0,243,255,0.2)]"
+          >
+            <Check className="text-neon-cyan" size={16} />
+            <span className="text-white font-bold text-sm tracking-tight">Link copied to clipboard</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className={cn(
         "transition-all duration-700 ease-in-out flex flex-col items-center px-4",
@@ -419,6 +541,20 @@ export default function App() {
               placeholder="Search the decentralized web..."
               className="flex-1 bg-transparent border-none outline-none py-4 text-lg text-white placeholder:text-white/10"
             />
+            {query && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setSuggestions([]);
+                  setShowSuggestions(false);
+                  inputRef.current?.focus();
+                }}
+                className="p-2 text-white/20 hover:text-white/60 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            )}
             <button
               type="submit"
               disabled={loadingMap.general && loadingMap.images && loadingMap.videos}
@@ -575,10 +711,10 @@ export default function App() {
                           <div className={cn(
                             "grid gap-6",
                             cat === 'images' 
-                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4" 
+                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
                               : "grid-cols-1"
                           )}>
-                            {Array.from({ length: 8 }).map((_, i) => (
+                            {Array.from({ length: 12 }).map((_, i) => (
                               <div key={i} className={cn(
                                 "glass rounded-2xl animate-pulse overflow-hidden",
                                 cat === 'images' ? "aspect-square" : "p-6 h-48"
@@ -594,7 +730,7 @@ export default function App() {
                           <div className={cn(
                             "grid gap-6",
                             cat === 'images' 
-                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4" 
+                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6" 
                               : "grid-cols-1"
                           )}>
                             {resultsMap[cat].map((result, idx) => (
