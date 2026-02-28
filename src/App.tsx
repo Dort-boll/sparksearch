@@ -275,10 +275,17 @@ export default function App() {
   const currentAggregations = aggregationsMap[activeTab];
 
   return (
-    <div className="min-h-screen relative font-sans selection:bg-neon-cyan/30">
+    <div className="min-h-screen relative font-sans selection:bg-neon-cyan/30 overflow-x-hidden">
+      {/* Global Noise Overlay */}
+      <div className="fixed inset-0 pointer-events-none z-[100] opacity-[0.03] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
+      
+      {/* Scanline Effect */}
+      <div className="fixed inset-0 pointer-events-none z-[90] opacity-[0.02] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
+      
       {/* Background Elements */}
-      <div className="blob blob-1" />
-      <div className="blob blob-2" />
+      <div className="blob blob-1 scale-150 blur-[120px]" />
+      <div className="blob blob-2 scale-150 blur-[120px]" />
+      <div className="fixed inset-0 bg-[#050505] -z-20" />
 
       <main className={cn(
         "transition-all duration-700 ease-in-out flex flex-col items-center px-4",
@@ -309,8 +316,8 @@ export default function App() {
             layout
             onSubmit={(e) => handleSearch(e)}
             className={cn(
-              "w-full glass rounded-2xl p-1 flex items-center gap-2 transition-all duration-300",
-              "focus-within:ring-2 focus-within:ring-neon-cyan/50 focus-within:neon-glow-cyan"
+              "w-full glass rounded-2xl p-1.5 flex items-center gap-2 transition-all duration-500",
+              "focus-within:ring-1 focus-within:ring-white/20 focus-within:shadow-[0_0_50px_-12px_rgba(0,243,255,0.3)]"
             )}
           >
             <div className="pl-4 text-white/40">
@@ -324,14 +331,17 @@ export default function App() {
               onFocus={() => query.length >= 2 && setShowSuggestions(true)}
               onKeyDown={handleKeyDown}
               placeholder="Search the decentralized web..."
-              className="flex-1 bg-transparent border-none outline-none py-4 text-lg text-white placeholder:text-white/20"
+              className="flex-1 bg-transparent border-none outline-none py-4 text-lg text-white placeholder:text-white/10"
             />
             <button
               type="submit"
               disabled={loadingMap.general && loadingMap.images && loadingMap.videos}
-              className="bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-neon-cyan hover:text-black transition-colors disabled:opacity-50"
+              className="bg-white text-black px-8 py-3.5 rounded-xl font-bold hover:bg-neon-cyan hover:text-black transition-all duration-500 disabled:opacity-50 active:scale-95 shadow-lg group relative overflow-hidden"
             >
-              {(loadingMap.general || loadingMap.images || loadingMap.videos) ? <Loader2 className="animate-spin" /> : "Search"}
+              <span className="relative z-10">
+                {(loadingMap.general || loadingMap.images || loadingMap.videos) ? <Loader2 className="animate-spin" /> : "Search"}
+              </span>
+              <div className="absolute inset-0 bg-gradient-to-r from-neon-cyan to-neon-purple opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             </button>
           </motion.form>
 

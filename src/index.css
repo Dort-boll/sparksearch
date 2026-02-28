@@ -19,16 +19,38 @@ body {
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+  pointer-events: none;
 }
 
 .glass-strong {
-  background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
+  background: rgba(5, 5, 5, 0.8);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("https://grainy-gradients.vercel.app/noise.svg");
+  opacity: 0.1;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .neon-glow-cyan {
@@ -59,17 +81,19 @@ body {
   background: var(--color-neon-cyan);
   top: -10%;
   left: -10%;
-  animation: float 20s infinite alternate;
+  animation: float 20s infinite linear;
 }
 
 .blob-2 {
   background: var(--color-neon-purple);
   bottom: -10%;
   right: -10%;
-  animation: float 25s infinite alternate-reverse;
+  animation: float 25s infinite linear reverse;
 }
 
 @keyframes float {
-  from { transform: translate(0, 0); }
-  to { transform: translate(100px, 100px); }
+  0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+  33% { transform: translate(100px, -50px) scale(1.2) rotate(120deg); }
+  66% { transform: translate(-50px, 100px) scale(0.8) rotate(240deg); }
+  100% { transform: translate(0, 0) scale(1) rotate(360deg); }
 }
